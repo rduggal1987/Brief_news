@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>THE NEWS</title>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #111;
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+  color: white;
+}
+
+/* TOP NAV */
+.topbar {
+  background: #111;
+  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  border-bottom: 1px solid #222;
+}
+
+.logo {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+
+.logo .the {
+  font-family: 'Anton', sans-serif;
+  font-size: 13px;
+  color: white;
+  letter-spacing: 3px;
+}
+
+.logo .news {
+  background: #CC0000;
+  font-family: 'Anton', sans-serif;
+  font-size: 22px;
+  color: white;
+  padding: 2px 8px;
+  letter-spacing: 2px;
+}
+
+.search-bar {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  max-width: 400px;
+  margin: 0 1.5rem;
+}
+
+.search-bar input {
+  flex: 1;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #1e1e1e;
+  color: white;
+  font-size: 13px;
+  font-family: 'Inter', sans-serif;
+  outline: none;
+}
+
+.search-bar input:focus { border-color: #CC0000; }
+
+.search-bar button {
+  padding: 8px 16px;
+  background: #CC0000;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.search-bar button:hover { background: #aa0000; }
+.search-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* CHIPS */
+.chips {
+  background: #1a1a1a;
+  padding: 10px 1.5rem;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #222;
+}
+
+.chip {
+  padding: 5px 16px;
+  border-radius: 999px;
+  border: 1px solid #333;
+  font-size: 12px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  cursor: pointer;
+  color: #aaa;
+  background: transparent;
+  transition: all 0.15s;
+}
+
+.chip:hover { border-color: #CC0000; color: white; }
+.chip.active { background: #CC0000; color: white; border-color: #CC0000; }
+
+/* MAIN FEED */
+main {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+
+.meta-bar {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 1rem;
+  display: none;
+  justify-content: space-between;
+}
+
+/* NEWS CARD — matches template */
+.card {
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+  animation: fadeUp 0.4s ease forwards;
+  opacity: 0;
+  transform: translateY(12px);
+  cursor: pointer;
+  text-decoration: none;
+  display: block;
+}
+
+@keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+
+.card-image {
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
+  display: block;
+  background: #1a1a1a;
+  position: relative;
+}
+
+.card-image-placeholder {
+  width: 100%;
+  height: 220px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.city-overlay {
+  position: absolute;
+  inset: 0;
+  background: url('https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=800&q=80') center/cover no-repeat;
+  opacity: 0.6;
+}
+
+.card-logo {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  z-index: 2;
+}
+
+.card-logo .the-small {
+  font-family: 'Anton', sans-serif;
+  font-size: 10px;
+  color: white;
+  letter-spacing: 2px;
+  display: block;
+}
+
+.card-logo .news-small {
+  background: #CC0000;
+  font-family: 'Anton', sans-serif;
+  font-size: 16px;
+  color: white;
+  padding: 1px 6px;
+  letter-spacing: 1px;
+  display: block;
+}
+
+/* RED BOTTOM SECTION */
+.card-body {
+  background: #CC0000;
+  padding: 1.25rem 1.25rem 1.25rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.card-body::before {
+  content: '';
+  position: absolute;
+  right: -20px;
+  bottom: -20px;
+  width: 180px;
+  height: 180px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Ccircle cx='100' cy='100' r='80' fill='none' stroke='rgba(255,255,255,0.08)' stroke-width='2'/%3E%3Ccircle cx='100' cy='100' r='60' fill='none' stroke='rgba(255,255,255,0.06)' stroke-width='2'/%3E%3Ccircle cx='100' cy='100' r='40' fill='none' stroke='rgba(255,255,255,0.05)' stroke-width='2'/%3E%3C/svg%3E") center/cover no-repeat;
+  opacity: 0.5;
+}
+
+.card-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: white;
+  line-height: 1.35;
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.card-divider {
+  width: 100%;
+  height: 1px;
+  background: rgba(255,255,255,0.3);
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.card-summary {
+  font-size: 13px;
+  font-weight: 300;
+  color: rgba(255,255,255,0.88);
+  line-height: 1.7;
+  position: relative;
+  z-index: 1;
+}
+
+.card-footer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.card-source {
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.card-words {
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+  background: rgba(0,0,0,0.2);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+/* STATUS & ERROR */
+.status {
+  text-align: center;
+  padding: 4rem 1rem;
+  color: #555;
+  font-size: 14px;
+}
+
+.dots span {
+  display: inline-block;
+  animation: blink 1.2s infinite;
+  font-size: 24px;
+  color: #CC0000;
+}
+
+.dots span:nth-child(2) { animation-delay: 0.2s; }
+.dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes blink { 0%,80%,100%{opacity:0.1} 40%{opacity:1} }
+
+.status-label {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #444;
+}
+
+.error-box {
+  background: #1e1e1e;
+  border: 1px solid #CC0000;
+  border-radius: 12px;
+  padding: 1.5rem;
+  text-align: center;
+  font-size: 13px;
+  color: #ff6b6b;
+  margin-top: 1rem;
+  line-height: 1.7;
+}
+
+.retry-btn {
+  margin-top: 12px;
+  display: inline-block;
+  padding: 8px 20px;
+  background: #CC0000;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.powered {
+  text-align: center;
+  font-size: 11px;
+  color: #333;
+  margin-top: 2rem;
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">
+    <span class="the">THE</span>
+    <span class="news">NEWS</span>
+  </div>
+  <div class="search-bar">
+    <input type="text" id="topicInput" placeholder="Search any topic..." value="India"/>
+    <button id="fetchBtn" onclick="fetchNews()">Search</button>
+  </div>
+</div>
+
+<div class="chips">
+  <div class="chip active" onclick="setTopic('India', this)">India</div>
+  <div class="chip" onclick="setTopic('Technology', this)">Technology</div>
+  <div class="chip" onclick="setTopic('Business', this)">Business</div>
+  <div class="chip" onclick="setTopic('Sports', this)">Sports</div>
+  <div class="chip" onclick="setTopic('World', this)">World</div>
+  <div class="chip" onclick="setTopic('Politics', this)">Politics</div>
+  <div class="chip" onclick="setTopic('Cricket', this)">Cricket</div>
+</div>
+
+<main>
+  <div id="metaBar" class="meta-bar"></div>
+  <div id="feed">
+    <div class="status">
+      <div class="dots"><span>●</span><span>●</span><span>●</span></div>
+      <div class="status-label">Loading today's news...</div>
+    </div>
+  </div>
+  <div class="powered">Powered by Groq AI · Google News</div>
+</main>
+
+<script>
+function setTopic(t, el) {
+  document.getElementById("topicInput").value = t;
+  document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+  el.classList.add("active");
+  fetchNews();
+}
+
+function wordCount(text) {
+  return text ? text.split(/\s+/).filter(Boolean).length : 0;
+}
+
+function showStatus(msg) {
+  document.getElementById("feed").innerHTML = `
+    <div class="status">
+      <div class="dots"><span>●</span><span>●</span><span>●</span></div>
+      <div class="status-label">${msg}</div>
+    </div>`;
+}
+
+function showError(msg) {
+  document.getElementById("feed").innerHTML = `
+    <div class="error-box">
+      <strong>Could not load news</strong><br/><br/>
+      ${msg}<br/><br/>
+      <button class="retry-btn" onclick="fetchNews()">Try Again</button>
+    </div>`;
+}
+
+async function fetchNews() {
+  const topic = document.getElementById("topicInput").value.trim() || "India";
+  const btn = document.getElementById("fetchBtn");
+  const metaBar = document.getElementById("metaBar");
+
+  btn.disabled = true;
+  metaBar.style.display = "none";
+  showStatus("Fetching latest news...");
+
+  try {
+    const res = await fetch(`/api/news?topic=${encodeURIComponent(topic)}`);
+    const data = await res.json();
+
+    if (data.error) throw new Error(data.error);
+    if (!data.articles?.length) {
+      showError(`No news found for "${topic}". Try another topic.`);
+      btn.disabled = false;
+      return;
+    }
+
+    const feed = document.getElementById("feed");
+    feed.innerHTML = "";
+    metaBar.style.display = "flex";
+    metaBar.innerHTML = `<span>${data.articles.length} stories</span><span>${topic} · Just now</span>`;
+
+    data.articles.forEach((a, i) => {
+      const wc = wordCount(a.summary);
+      const card = document.createElement("a");
+      card.className = "card";
+      card.href = a.link || "#";
+      card.target = "_blank";
+      card.rel = "noopener noreferrer";
+      card.style.animationDelay = `${i * 0.08}s`;
+      card.innerHTML = `
+        <div class="card-image-placeholder">
+          <div class="city-overlay"></div>
+          <div class="card-logo">
+            <span class="the-small">THE</span>
+            <span class="news-small">NEWS</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-title">${a.short_title}</div>
+          <div class="card-divider"></div>
+          <div class="card-summary">${a.summary}</div>
+          <div class="card-footer-row">
+            <span class="card-source">${a.source}</span>
+            <span class="card-words">${wc} words</span>
+          </div>
+        </div>`;
+      feed.appendChild(card);
+    });
+
+  } catch (err) {
+    showError(err.message);
+  }
+
+  btn.disabled = false;
+}
+
+document.getElementById("topicInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") fetchNews();
+});
+
+fetchNews();
+</script>
+</body>
+</html>
