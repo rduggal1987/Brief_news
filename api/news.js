@@ -16,7 +16,6 @@ export default async function handler(req, res) {
 
     // ── STEP 1: Fetch Google News RSS ──────────────────────────────
     const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-US&gl=US&ceid=US:en`;
-
     const rssRes = await fetch(rssUrl, {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
     });
@@ -26,8 +25,6 @@ export default async function handler(req, res) {
     }
 
     const rssText = await rssRes.text();
-
-    // ── STEP 2: Parse RSS items ────────────────────────────────────
     const rawItems = rssText.match(/<item>[\s\S]*?<\/item>/g) || [];
     const items = rawItems.slice(0, 30);
 
@@ -35,7 +32,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ articles: [], total: 0 });
     }
 
-    // Extract basic info from each item
+    // ── STEP 2: Parse RSS items ────────────────────────────────────
     const parsed = items.map((item) => {
 
       // Title
@@ -46,7 +43,7 @@ export default async function handler(req, res) {
       else if (titlePlain) title = titlePlain[1];
       title = title.replace(/<[^>]+>/g, "").replace(/\s*-\s*[^-]*$/, "").trim();
 
-      // Link
+      // Link — Google News uses a redirect URL, extract real URL if possible
       let link = "#";
       const linkMatch = item.match(/<link>([\s\S]*?)<\/link>/);
       const guidMatch = item.match(/<guid[^>]*>([\s\S]*?)<\/guid>/);
@@ -63,35 +60,81 @@ export default async function handler(req, res) {
       const dateMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
       if (dateMatch) pubDate = dateMatch[1].trim();
 
-      // Image — try multiple locations in RSS
-      let image = "";
-
-      const mediaSrc = item.match(/url=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp|gif)[^"']*?)["']/i);
-      if (mediaSrc) image = mediaSrc[1];
-
-      if (!image) {
-        const enclosure = item.match(/<enclosure[^>]*url=["'](https?:\/\/[^"']+)["'][^>]*type=["']image/i);
-        if (enclosure) image = enclosure[1];
-      }
-
-      if (!image) {
-        const descBlock = item.match(/<description>([\s\S]*?)<\/description>/);
-        if (descBlock) {
-          const decoded = descBlock[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-          const imgTag = decoded.match(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/i);
-          if (imgTag) image = imgTag[1];
-        }
-      }
-
-      return { title, link, source, pubDate, image };
+      return { title, link, source, pubDate };
     }).filter(a => a.title.length > 5);
 
-    if (parsed.length === 0) {
+    // ── STEP 3: Fetch og:image from each article page ──────────────
+    const withImages = await Promise.all(
+      parsed.map(async (article) => {
+        let image = "";
+
+        try {
+          if (article.link && article.link !== "#") {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 4000);
+
+            const pageRes = await fetch(article.link, {
+              signal: controller.signal,
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "en-US,en;q=0.9"
+              }
+            });
+            clearTimeout(timeout);
+
+            if (pageRes.ok) {
+              // Only read first 10KB to find og:image quickly
+              const reader = pageRes.body.getReader();
+              let html = "";
+              let done = false;
+
+              while (!done && html.length < 10000) {
+                const { value, done: d } = await reader.read();
+                done = d;
+                if (value) html += new TextDecoder().decode(value);
+              }
+
+              reader.cancel();
+
+              // Try og:image
+              const ogImg =
+                html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["'](https?:\/\/[^"']+)["']/i) ||
+                html.match(/<meta[^>]*content=["'](https?:\/\/[^"']+)["'][^>]*property=["']og:image["']/i);
+
+              if (ogImg) {
+                image = ogImg[1];
+              }
+
+              // Fallback: twitter:image
+              if (!image) {
+                const twitterImg =
+                  html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["'](https?:\/\/[^"']+)["']/i) ||
+                  html.match(/<meta[^>]*content=["'](https?:\/\/[^"']+)["'][^>]*name=["']twitter:image["']/i);
+                if (twitterImg) image = twitterImg[1];
+              }
+
+              // Fallback: first large img tag
+              if (!image) {
+                const imgTag = html.match(/<img[^>]+src=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp)[^"']*?)["']/i);
+                if (imgTag) image = imgTag[1];
+              }
+            }
+          }
+        } catch (e) {
+          // silently skip — image stays empty
+        }
+
+        return { ...article, image };
+      })
+    );
+
+    if (withImages.length === 0) {
       return res.status(200).json({ articles: [], total: 0 });
     }
 
-    // ── STEP 3: Summarize with Groq in one call ────────────────────
-    const headlines = parsed.map((a, i) => `${i + 1}. ${a.title}`).join("\n");
+    // ── STEP 4: Summarize with Groq ────────────────────────────────
+    const headlines = withImages.map((a, i) => `${i + 1}. ${a.title}`).join("\n");
 
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -106,11 +149,11 @@ export default async function handler(req, res) {
         messages: [
           {
             role: "system",
-            content: "You are a news summarizer like Inshorts. Return ONLY a valid JSON array. No markdown. No explanation. No extra text. Each object must have exactly two keys: short_title (max 8 words) and summary (max 60 words, simple English)."
+            content: "You are a news summarizer like Inshorts. Return ONLY a valid JSON array. No markdown. No explanation. Each object must have: short_title (max 8 words) and summary (max 60 words, simple English)."
           },
           {
             role: "user",
-            content: `Summarize each of these ${parsed.length} news headlines. Return a JSON array with exactly ${parsed.length} objects.\n\n${headlines}`
+            content: `Summarize each of these ${withImages.length} headlines. Return a JSON array with exactly ${withImages.length} objects.\n\n${headlines}`
           }
         ]
       })
@@ -123,8 +166,6 @@ export default async function handler(req, res) {
 
     const groqData = await groqRes.json();
     const rawText = groqData.choices?.[0]?.message?.content || "";
-
-    // Clean and parse JSON
     const cleaned = rawText.replace(/```json|```/g, "").trim();
     const jsonStart = cleaned.indexOf("[");
     const jsonEnd = cleaned.lastIndexOf("]");
@@ -135,8 +176,8 @@ export default async function handler(req, res) {
 
     const summaries = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
 
-    // ── STEP 4: Merge and return ───────────────────────────────────
-    const articles = parsed.map((p, i) => ({
+    // ── STEP 5: Merge and return ───────────────────────────────────
+    const articles = withImages.map((p, i) => ({
       short_title: summaries[i]?.short_title || p.title,
       summary: summaries[i]?.summary || "",
       source: p.source,
