@@ -1,7 +1,13 @@
 export default async function handler(req, res) {
+
+  // ── Disable ALL caching — always fetch fresh news ──────────────
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Surrogate-Control", "no-store");
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
@@ -14,10 +20,17 @@ export default async function handler(req, res) {
 
   try {
 
-    // ── STEP 1: Fetch Google News RSS ──────────────────────────────
-    const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-US&gl=US&ceid=US:en`;
+    // ── STEP 1: Fetch Google News RSS with cache-busting ───────────
+    const cacheBuster = Date.now();
+    const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-US&gl=US&ceid=US:en&_=${cacheBuster}`;
+
     const rssRes = await fetch(rssUrl, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+      cache: "no-store",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
+      }
     });
 
     if (!rssRes.ok) {
@@ -35,7 +48,6 @@ export default async function handler(req, res) {
     // ── STEP 2: Parse RSS items ────────────────────────────────────
     const parsed = items.map((item) => {
 
-      // Title
       let title = "";
       const titleCdata = item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/);
       const titlePlain = item.match(/<title>([\s\S]*?)<\/title>/);
@@ -43,19 +55,16 @@ export default async function handler(req, res) {
       else if (titlePlain) title = titlePlain[1];
       title = title.replace(/<[^>]+>/g, "").replace(/\s*-\s*[^-]*$/, "").trim();
 
-      // Link — Google News uses a redirect URL, extract real URL if possible
       let link = "#";
       const linkMatch = item.match(/<link>([\s\S]*?)<\/link>/);
       const guidMatch = item.match(/<guid[^>]*>([\s\S]*?)<\/guid>/);
       if (linkMatch) link = linkMatch[1].trim();
       else if (guidMatch) link = guidMatch[1].trim();
 
-      // Source
       let source = "Google News";
       const sourceMatch = item.match(/<source[^>]*>([\s\S]*?)<\/source>/);
       if (sourceMatch) source = sourceMatch[1].replace(/<[^>]+>/g, "").trim();
 
-      // Publication date
       let pubDate = "";
       const dateMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
       if (dateMatch) pubDate = dateMatch[1].trim();
@@ -67,7 +76,6 @@ export default async function handler(req, res) {
     const withImages = await Promise.all(
       parsed.map(async (article) => {
         let image = "";
-
         try {
           if (article.link && article.link !== "#") {
             const controller = new AbortController();
@@ -75,16 +83,17 @@ export default async function handler(req, res) {
 
             const pageRes = await fetch(article.link, {
               signal: controller.signal,
+              cache: "no-store",
               headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "en-US,en;q=0.9"
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cache-Control": "no-cache"
               }
             });
             clearTimeout(timeout);
 
             if (pageRes.ok) {
-              // Only read first 10KB to find og:image quickly
               const reader = pageRes.body.getReader();
               let html = "";
               let done = false;
@@ -94,17 +103,13 @@ export default async function handler(req, res) {
                 done = d;
                 if (value) html += new TextDecoder().decode(value);
               }
-
               reader.cancel();
 
               // Try og:image
               const ogImg =
                 html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["'](https?:\/\/[^"']+)["']/i) ||
                 html.match(/<meta[^>]*content=["'](https?:\/\/[^"']+)["'][^>]*property=["']og:image["']/i);
-
-              if (ogImg) {
-                image = ogImg[1];
-              }
+              if (ogImg) image = ogImg[1];
 
               // Fallback: twitter:image
               if (!image) {
@@ -114,16 +119,14 @@ export default async function handler(req, res) {
                 if (twitterImg) image = twitterImg[1];
               }
 
-              // Fallback: first large img tag
+              // Fallback: first img src
               if (!image) {
                 const imgTag = html.match(/<img[^>]+src=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp)[^"']*?)["']/i);
                 if (imgTag) image = imgTag[1];
               }
             }
           }
-        } catch (e) {
-          // silently skip — image stays empty
-        }
+        } catch (e) {}
 
         return { ...article, image };
       })
@@ -176,7 +179,7 @@ export default async function handler(req, res) {
 
     const summaries = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
 
-    // ── STEP 5: Merge and return ───────────────────────────────────
+    // ── STEP 5: Merge and return with timestamp ────────────────────
     const articles = withImages.map((p, i) => ({
       short_title: summaries[i]?.short_title || p.title,
       summary: summaries[i]?.summary || "",
@@ -186,7 +189,11 @@ export default async function handler(req, res) {
       pubDate: p.pubDate
     }));
 
-    return res.status(200).json({ articles, total: articles.length });
+    return res.status(200).json({
+      articles,
+      total: articles.length,
+      fetchedAt: new Date().toISOString()
+    });
 
   } catch (err) {
     return res.status(500).json({ error: `Server error: ${err.message}` });
