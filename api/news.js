@@ -1,13 +1,12 @@
 export default async function handler(req, res) {
-
-  // ── Disable ALL caching — always fetch fresh news ──────────────
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
   res.setHeader("Surrogate-Control", "no-store");
+  res.setHeader("CDN-Cache-Control", "no-store");
+  res.setHeader("Vercel-CDN-Cache-Control", "no-store");
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
@@ -20,7 +19,7 @@ export default async function handler(req, res) {
 
   try {
 
-    // ── STEP 1: Fetch Google News RSS with cache-busting ───────────
+    // ── STEP 1: Fetch Google News RSS ──────────────────────────────
     const cacheBuster = Date.now();
     const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-US&gl=US&ceid=US:en&_=${cacheBuster}`;
 
@@ -39,14 +38,13 @@ export default async function handler(req, res) {
 
     const rssText = await rssRes.text();
     const rawItems = rssText.match(/<item>[\s\S]*?<\/item>/g) || [];
-    const items = rawItems.slice(0, 30);
 
-    if (items.length === 0) {
+    if (rawItems.length === 0) {
       return res.status(200).json({ articles: [], total: 0 });
     }
 
-    // ── STEP 2: Parse RSS items ────────────────────────────────────
-    const parsed = items.map((item) => {
+    // ── STEP 2: Parse ALL items ────────────────────────────────────
+    const allParsed = rawItems.map((item) => {
 
       let title = "";
       const titleCdata = item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/);
@@ -66,13 +64,37 @@ export default async function handler(req, res) {
       if (sourceMatch) source = sourceMatch[1].replace(/<[^>]+>/g, "").trim();
 
       let pubDate = "";
+      let pubTimestamp = 0;
       const dateMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
-      if (dateMatch) pubDate = dateMatch[1].trim();
+      if (dateMatch) {
+        pubDate = dateMatch[1].trim();
+        pubTimestamp = new Date(pubDate).getTime();
+      }
 
-      return { title, link, source, pubDate };
+      return { title, link, source, pubDate, pubTimestamp };
     }).filter(a => a.title.length > 5);
 
-    // ── STEP 3: Fetch og:image from each article page ──────────────
+    // ── STEP 3: Sort by newest first ──────────────────────────────
+    allParsed.sort((a, b) => b.pubTimestamp - a.pubTimestamp);
+
+    // ── STEP 4: Filter to last 48 hours only ──────────────────────
+    const now = Date.now();
+    const fortyEightHours = 48 * 60 * 60 * 1000;
+
+    let recentArticles = allParsed.filter(a => {
+      if (!a.pubTimestamp) return true; // keep if no date
+      return (now - a.pubTimestamp) <= fortyEightHours;
+    });
+
+    // If less than 10 recent articles, fall back to top 20 newest
+    if (recentArticles.length < 10) {
+      recentArticles = allParsed.slice(0, 20);
+    }
+
+    // Take top 30
+    const parsed = recentArticles.slice(0, 30);
+
+    // ── STEP 5: Fetch og:image from each article page ──────────────
     const withImages = await Promise.all(
       parsed.map(async (article) => {
         let image = "";
@@ -105,13 +127,11 @@ export default async function handler(req, res) {
               }
               reader.cancel();
 
-              // Try og:image
               const ogImg =
                 html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["'](https?:\/\/[^"']+)["']/i) ||
                 html.match(/<meta[^>]*content=["'](https?:\/\/[^"']+)["'][^>]*property=["']og:image["']/i);
               if (ogImg) image = ogImg[1];
 
-              // Fallback: twitter:image
               if (!image) {
                 const twitterImg =
                   html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["'](https?:\/\/[^"']+)["']/i) ||
@@ -119,7 +139,6 @@ export default async function handler(req, res) {
                 if (twitterImg) image = twitterImg[1];
               }
 
-              // Fallback: first img src
               if (!image) {
                 const imgTag = html.match(/<img[^>]+src=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp)[^"']*?)["']/i);
                 if (imgTag) image = imgTag[1];
@@ -136,7 +155,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ articles: [], total: 0 });
     }
 
-    // ── STEP 4: Summarize with Groq ────────────────────────────────
+    // ── STEP 6: Summarize with Groq ────────────────────────────────
     const headlines = withImages.map((a, i) => `${i + 1}. ${a.title}`).join("\n");
 
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -179,20 +198,23 @@ export default async function handler(req, res) {
 
     const summaries = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
 
-    // ── STEP 5: Merge and return with timestamp ────────────────────
+    // ── STEP 7: Merge and return ───────────────────────────────────
     const articles = withImages.map((p, i) => ({
       short_title: summaries[i]?.short_title || p.title,
       summary: summaries[i]?.summary || "",
       source: p.source,
       link: p.link,
       image: p.image,
-      pubDate: p.pubDate
+      pubDate: p.pubDate,
+      pubTimestamp: p.pubTimestamp
     }));
 
     return res.status(200).json({
       articles,
       total: articles.length,
-      fetchedAt: new Date().toISOString()
+      fetchedAt: new Date().toISOString(),
+      oldestArticle: articles[articles.length - 1]?.pubDate || "",
+      newestArticle: articles[0]?.pubDate || ""
     });
 
   } catch (err) {
